@@ -1,0 +1,1 @@
+{"name":"letta-entry","private":true,"type":"module","dependencies":{"@letta-ai/letta-agent-sdk":"^0.8.70","@letta-ai/letta-code":"^0.34.41"}}
