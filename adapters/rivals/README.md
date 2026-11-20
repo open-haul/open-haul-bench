@@ -20,7 +20,7 @@ cd adapters/rivals && npm ci
 NODE_USE_ENV_PROXY=1 RIVAL_MODE=bedrock node run.mjs --adapter ./adapters/rivals/claude-agent-sdk.mjs --name sdk-s1 --seed 20261201 --hours 12 --cap-usd 8
 ```
 
-`RIVAL_MODE=anthropic` sends to the Anthropic API instead (`MODEL_KEY`, `UPSTREAM`). Auth to Bedrock: `AWS_BEARER_TOKEN_BEDROCK` if set, otherwise the request is unsigned, which works where an egress proxy injects the credential (the cloud sandbox).
+`RIVAL_MODE=anthropic` sends to the Anthropic API instead (`MODEL_KEY`, `UPSTREAM`, no shim). This is what the 12h runs use, on the research key (cloud env var `RESEARCH_ANTHROPIC_KEY`, passed as `MODEL_KEY`), because those credits expire soon: `RIVAL_MODE=anthropic MODEL_KEY="$RESEARCH_ANTHROPIC_KEY" UPSTREAM=https://api.anthropic.com node run.mjs --adapter ...`. All three adapters were smoked in both modes. Auth to Bedrock: `AWS_BEARER_TOKEN_BEDROCK` if set, otherwise the request is unsigned, which works where an egress proxy injects the credential (the cloud sandbox).
 
 ## Honest limits
 
