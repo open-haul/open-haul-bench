@@ -17,8 +17,8 @@ const parseCond = (s) => { if (!s) return undefined; const [k, v] = s.split(":")
 export default {
   name: "rival-langchain-default",
   version: () => `langchain ${pkgVersion("langchain")}, @langchain/anthropic ${pkgVersion("@langchain/anthropic")}`,
-  async run({ tools, system, task, nudge, budget, model, event, log, finished, dir }) {
-    const gw = (await startGateway({ dir: dir ?? process.cwd(), entry: "langchain-default", model, event })).attach(budget);
+  async run({ tools, system, task, nudge, budget, model, event, log, finished, dir, checkpoint }) {
+    const gw = (await startGateway({ dir: dir ?? process.cwd(), entry: "langchain-default", model, event })).attach(budget, checkpoint);
     const abort = new AbortController(); let stopErr = null;
     const onStop = (e) => { if (!stopErr) { stopErr = e; log(`stopping: ${e.reason}`); setTimeout(() => abort.abort(), 50); } };
     const lcTools = gw.guard(tools, onStop).map((t) => tool(async (args) => {

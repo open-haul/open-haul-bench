@@ -34,9 +34,9 @@ const KEEP = ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TZ", "HTTPS_PROXY", "
 export default {
   name: "rival-claude-agent-sdk",
   version: () => `claude-agent-sdk ${sdkVersion()}`,
-  async run({ tools, system, task, nudge, budget, model, event, log, finished, dir }) {
-    const root = dir ?? process.cwd(), cwd = join(root, "sdk-cwd"), configDir = join(root, "sdk-config"); mkdirSync(cwd, { recursive: true }); mkdirSync(configDir, { recursive: true });
-    const gw = (await startGateway({ dir: root, entry: "claude-agent-sdk", model, event })).attach(budget);
+  async run({ tools, system, task, nudge, budget, model, event, log, finished, dir, checkpoint }) {
+    const root = dir ?? process.cwd(), scratch = process.env.RIVAL_SCRATCH ? join(process.env.RIVAL_SCRATCH, `sdk-${Date.now()}`) : root, cwd = join(scratch, "sdk-cwd"), configDir = join(scratch, "sdk-config"); mkdirSync(cwd, { recursive: true }); mkdirSync(configDir, { recursive: true });
+    const gw = (await startGateway({ dir: root, entry: "claude-agent-sdk", model, event })).attach(budget, checkpoint);
     const abort = new AbortController(); let stopErr = null;
     const onStop = (e) => { if (!stopErr) { stopErr = e; log(`stopping: ${e.reason}`); setTimeout(() => abort.abort(), 50); } };
     const defs = gw.guard(tools, onStop).map((t) => tool(t.name, t.description, shapeOf(t.input_schema), async (args) => {

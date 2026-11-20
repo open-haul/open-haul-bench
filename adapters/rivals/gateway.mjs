@@ -25,18 +25,19 @@ export async function startGateway({ dir, entry, model, event = () => {}, mode =
 
   // read the ledger rows written since the last drain and hand each to budget.report(); returns a Stop when the cap or the clock says so (a finished shift is not a stop)
   function drain(budget) {
-    let size = 0; try { size = statSync(ledgerFile).size; } catch { return stopped; }
+    let due = false, size = 0; try { size = statSync(ledgerFile).size; } catch { return stopped; }
     if (size > offset) {
       const fd = openSync(ledgerFile, "r"), buf = Buffer.alloc(size - offset); readSync(fd, buf, 0, buf.length, offset); closeSync(fd); offset = size;
       const lines = (carry + buf.toString("utf8")).split("\n"); carry = lines.pop();
       for (const l of lines) {
         if (!l) continue; let r; try { r = JSON.parse(l); } catch { continue; }
-        rows++;
+        rows++; if (guard.checkpoint && rows % guard.every === 0) due = true;
         if (r.status !== 200) { errors++; event({ type: "api_error", status: r.status, refused: !!r.refused }); continue; }
         try { budget.beforeCall(); } catch (e) { if (!(e instanceof Stop)) throw e; if (e.reason !== "finish") stopped ??= e; }
         budget.report({ promptTokens: r.prompt_tokens ?? null, outputTokens: r.tokens?.output ?? null, usd: r.usd ?? 0, cacheRead: r.tokens?.cache_read ?? 0, cacheWrite: r.tokens?.cache_write ?? 0, compacted: !!r.compaction || r.kind === "other" });
       }
     }
+    if (due) guard.checkpoint();
     return stopped;
   }
   // wrap the world's tools: before each one, account for the model requests made since the last tool and stop the framework if the cap or clock has been reached
@@ -47,7 +48,7 @@ export async function startGateway({ dir, entry, model, event = () => {}, mode =
   } }));
   return {
     url: proxy.url, apiKey: mode === "bedrock" ? "bedrock-shim-no-key" : model.apiKey, mode, ledgerFile, proxy, shim,
-    attach(budget) { guard.budget = budget; return this; },
+    attach(budget, checkpoint = null, every = 50) { guard.budget = budget; guard.checkpoint = checkpoint; guard.every = every; return this; },
     drain, guard, rowsSeen: () => rows, errors: () => errors, stopped: () => stopped,
     totalUsd: () => proxy.totalUsd(),
     async close() { await proxy.close(); if (shim) await shim.close(); },
