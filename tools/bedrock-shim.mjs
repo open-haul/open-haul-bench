@@ -4,7 +4,7 @@
 // and the same model, and tools/meter-proxy.mjs can sit between them and the shim to keep one spend ledger.
 //   node tools/bedrock-shim.mjs [--port 4871] [--model global.anthropic.claude-haiku-5-5] [--region us-east-1]
 // env: BEDROCK_MODEL_ID, AWS_REGION, BEDROCK_ENDPOINT (tests: a fake server), AWS_BEARER_TOKEN_BEDROCK (optional bearer key: when absent the request is sent unsigned, which is right
-// where an egress proxy injects the AWS credential itself, as in the cloud sandbox). On a laptop with SigV4 credentials only, set AWS_BEARER_TOKEN_BEDROCK or put a signing proxy in front.
+// where an egress proxy injects the AWS credential itself). On a laptop with SigV4 credentials only, set AWS_BEARER_TOKEN_BEDROCK or put a signing proxy in front.
 // Node 22 note: for outbound HTTPS through an HTTPS_PROXY, start node with NODE_USE_ENV_PROXY=1.
 // What it does: POST /v1/messages (stream or not) -> /model/<id>/invoke or /invoke-with-response-stream, decoding Bedrock's binary event stream back into Anthropic SSE events.
 // The `model` a client asks for is replaced by the one Bedrock model id (every arm runs the same model); the requested name is echoed back and kept in the x-requested-model response header.

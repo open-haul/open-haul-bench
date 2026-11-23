@@ -1,29 +1,30 @@
-# Rival adapters (internal, private repo until Neil has seen results)
+# Rival adapters
 
-Adapters that run other long-agent stacks on Longshift at their **stock settings**, on the same model (Claude Haiku 5.5) through the same meter. Nothing is tuned in anyone's favour. Competitors are not to be named publicly until Neil has seen the results.
+These adapters run other long-agent stacks on Longshift at their stock settings, on the same model (Claude Haiku 5.5), through the same spend meter. Nothing is tuned for or against any of them. If you think a stack is configured unfairly, open an issue with the setting you would use and we will run it as a separate, named arm.
 
 | adapter | stack | what "stock" means here |
 |---|---|---|
-| `claude-agent-sdk.mjs` | Claude Agent SDK `query()` | its own context management (automatic compaction), built-in tools off, the twelve world tools as an in-process MCP server, no settings files |
-| `langchain-default.mjs` | LangChain `createAgent` + `summarizationMiddleware` | true defaults: the middleware has no trigger, so it never summarises. Effectively keep-everything, no prompt caching. Trigger variants are separate named arms (`LC_TRIGGER`, `LC_KEEP`) |
-| `letta.mjs` | Letta (letta-code local server + agent SDK) | as shipped: Letta Code agent with its memory filesystem, dreaming at its defaults, the brief as persona. One disclosed change: `letta/patch-catalog.mjs` adds Haiku 5.5 to Letta's bundled model catalog (cd adapters/rivals/letta && npm ci) |
+| `claude-agent-sdk.mjs` | Claude Agent SDK `query()` | Its own context management (automatic compaction). Built-in tools are off, the twelve world tools run as an in-process MCP server, and no settings files are loaded. |
+| `langchain-default.mjs` | LangChain `createAgent` with `summarizationMiddleware` | The middleware's true defaults. With no trigger configured it does not summarize, so this arm keeps the whole transcript and sends no prompt caching headers. Trigger settings are separate named arms (`LC_TRIGGER`, `LC_KEEP`). |
+| `letta.mjs` | Letta (letta-code local server and agent SDK) | A Letta Code agent as shipped, with its memory filesystem and dreaming at their defaults. The brief goes in as the persona. One disclosed change: `letta/patch-catalog.mjs` adds Haiku 5.5 to Letta's bundled model catalog. |
 
-Dropped: the OpenAI Agents SDK. Its compaction session calls OpenAI's own `responses.compact` and only works with OpenAI Responses models, so it cannot run on Haiku without an OpenAI key. Its plain sessions keep everything, which is the keep baseline already.
+The OpenAI Agents SDK is not included. Its compaction session calls OpenAI's `responses.compact`, which only works with OpenAI Responses models, so it cannot run on Haiku. Its plain sessions keep everything, which the keep baseline already covers.
+
+Pinned versions are in the lockfiles: Claude Agent SDK 0.3.329, LangChain 1.6.7 (`@langchain/anthropic` 1.6.5, `@langchain/core` 1.4.2), letta-code 0.34.67.
 
 ## How a run is wired
 
-framework -> `tools/meter-proxy.mjs` (one ledger row per model request, including the framework's own background requests) -> `tools/bedrock-shim.mjs` (Anthropic Messages in, Bedrock InvokeModel out) -> Bedrock.
-The adapter drains new ledger rows into `budget.report()` each time the framework runs a world tool, and stops the framework when the cap or the clock is reached. Receipts per run: `ledger.jsonl`, `events.jsonl`, `metrics.jsonl`, `summary.json`.
+The framework sends its requests to `tools/meter-proxy.mjs`, which writes one ledger row per model request, including the framework's own background requests. The meter forwards to `tools/bedrock-shim.mjs` (Anthropic Messages in, Bedrock InvokeModel out) or straight to the Anthropic API. The adapter reads new ledger rows into the budget each time the framework runs a world tool, and stops the framework when the spend cap or the clock is reached. Each run leaves `ledger.jsonl`, `events.jsonl`, `metrics.jsonl` and `summary.json`.
 
 ```
-cd adapters/rivals && npm ci
+cd adapters/rivals && npm ci && cd ../..
 NODE_USE_ENV_PROXY=1 RIVAL_MODE=bedrock node run.mjs --adapter ./adapters/rivals/claude-agent-sdk.mjs --name sdk-s1 --seed 20261201 --hours 12 --cap-usd 8
 ```
 
-`RIVAL_MODE=anthropic` sends to the Anthropic API instead (`MODEL_KEY`, `UPSTREAM`, no shim). This is what the 12h runs use, on the research key (cloud env var `RESEARCH_ANTHROPIC_KEY`, passed as `MODEL_KEY`), because those credits expire soon: `RIVAL_MODE=anthropic MODEL_KEY="$RESEARCH_ANTHROPIC_KEY" UPSTREAM=https://api.anthropic.com node run.mjs --adapter ...`. All three adapters were smoked in both modes. Auth to Bedrock: `AWS_BEARER_TOKEN_BEDROCK` if set, otherwise the request is unsigned, which works where an egress proxy injects the credential (the cloud sandbox).
+`RIVAL_MODE=anthropic` skips the shim and sends to the Anthropic API instead: `RIVAL_MODE=anthropic MODEL_KEY=<your key> UPSTREAM=https://api.anthropic.com node run.mjs --adapter ...`. For Bedrock, set `AWS_BEARER_TOKEN_BEDROCK`. Without it the shim sends requests unsigned, which only works behind a proxy that adds the AWS credential. For Letta, run `npm ci` in `adapters/rivals/letta` as well.
 
-## Honest limits
+## Limits
 
-- Spend in the ledger is priced from `tools/prices-haiku-5-5.json`, the Anthropic API sheet (5x above 100K prompt tokens). Bedrock's own price sheet is not verified: the AWS bill is the truth.
-- The Bedrock shim answers `count_tokens` with an estimate. It maps every requested model name to the one configured Bedrock model.
-- Offline tests (free): `npm run test:rivals`.
+- Spend in the ledger is priced from `tools/prices-haiku-5-5.json`, the Anthropic API price sheet (5x above 100K prompt tokens). Bedrock's own price sheet is not checked, so your cloud bill is the final number.
+- The Bedrock shim answers `count_tokens` with an estimate and maps every requested model name to the one configured Bedrock model.
+- Offline tests, free to run: `npm run test:rivals`.
