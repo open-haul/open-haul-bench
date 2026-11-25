@@ -1,0 +1,10 @@
+{
+  "name": "open-haul-bench-rivals-deepagents",
+  "private": true,
+  "type": "module",
+  "description": "LangChain Deep Agents (deepagents) at its shipped defaults, run on Longshift. Own folder so its dependency tree does not move the pinned LangChain arm.",
+  "dependencies": {
+    "@langchain/anthropic": "^1.6.6",
+    "deepagents": "1.17.1"
+  }
+}
