@@ -20,7 +20,7 @@ export async function startGateway({ dir, entry, model, event = () => {}, mode =
   if (mode === "bedrock") { shim = await startBedrockShim({ modelId: process.env.BEDROCK_MODEL_ID, ...bedrock }); upstream = shim.url; }
   else if (mode !== "anthropic") throw new Error(`RIVAL_MODE must be bedrock or anthropic, got ${mode}`);
   const ledgerFile = join(dir, "ledger.jsonl");
-  const proxy = await startMeterProxy({ upstream, ledgerFile, entry, prices });
+  const proxy = await startMeterProxy({ upstream, ledgerFile, entry, prices, maxContext: model.maxContext ?? null });
   let offset = 0, carry = "", stopped = null, rows = 0, errors = 0;
 
   // read the ledger rows written since the last drain and hand each to budget.report(); returns a Stop when the cap or the clock says so (a finished shift is not a stop)
