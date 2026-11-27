@@ -13,17 +13,17 @@ const prof = JSON.parse(readFileSync(new URL("./multiday-profiles.json", import.
 const rate = (p) => (p > P.long_threshold ? P.long : P), money = (x) => (x >= 100 ? `$${Math.round(x)}` : x >= 10 ? `$${x.toFixed(1)}` : `$${x.toFixed(2)}`);
 // what each stack documents about when it compacts and what it keeps, fitted to the measured panel at W0 (the offset or share is READ from the panel, only the rule's shape is stated)
 const RULES = {
-  deepagents: { trigger: (W, p) => W * p.compactions.before_share_of_window, after: (b, p) => b * p.compactions.after_over_before, note: "summarises at a share of the window, keeps a share of it" },
-  "claude-agent-sdk": { trigger: (W, p) => W - (W0 - p.compactions.before_median), after: (b, p) => p.compactions.after_median, note: "compacts a fixed margin under the window, keeps a summary of fixed size" },
-  letta: { trigger: (W, p) => W - (W0 - p.compactions.before_median), after: (b, p) => b * p.compactions.after_over_before, note: "slides a fixed margin under the window, keeps a share of the prompt" },
+  deepagents: { trigger: (W, p, first) => W * (first ? p.compactions.first_before_share_of_window : p.compactions.before_share_of_window), after: (b, p, W) => W * (p.compactions.after_median / W0), note: "the first summarisation fires near the top of the window, later ones at a lower share (both measured at 100K and 200K); keeps about a fifth of the window" },
+  "claude-agent-sdk": { trigger: (W, p, first) => W - (W0 - p.compactions.before_median), after: (b, p) => p.compactions.after_median, note: "compacts a fixed margin under the window, keeps a summary of fixed size" },
+  letta: { trigger: (W, p, first) => W - (W0 - p.compactions.before_median), after: (b, p) => b * p.compactions.after_over_before, note: "slides a fixed margin under the window, keeps a share of the prompt" },
 };
 const SUMMARY_OUT = 4000;   // output tokens of one summarising request: an assumption, small next to the rest
 const request = (prompt, fresh, out) => { const r = rate(prompt), f = Math.min(prompt, fresh); return ((prompt - f) * r.cache_hit + f * r.cache_write + out * r.out) / 1e6; };
 // replay `calls` requests of one rival at window W
 function rival(name, W, calls, k = {}) {
-  const p = S[name], R = RULES[name], g = p.growth_per_call.mean_step * (k.g ?? 1), trig = R.trigger(W, p); let prompt = p.first_prompt, usd = 0, n = 0, first = null, over = 0, sum = 0, peak = 0;
+  const p = S[name], R = RULES[name], g = p.growth_per_call.mean_step * (k.g ?? 1); let trig = R.trigger(W, p, true); let prompt = p.first_prompt, usd = 0, n = 0, first = null, over = 0, sum = 0, peak = 0;
   for (let i = 0; i < calls; i++) {
-    if (prompt >= trig) { usd += request(prompt, 0, SUMMARY_OUT); const after = R.after(prompt, p); usd += request(after, after, p.out_per_call); n++; first ??= i; prompt = after; }   // the request after a compaction writes its whole new prompt to the cache
+    if (prompt >= trig) { usd += request(prompt, 0, SUMMARY_OUT); const after = R.after(prompt, p, W); trig = R.trigger(W, p, false); usd += request(after, after, p.out_per_call); n++; first ??= i; prompt = after; }   // the request after a compaction writes its whole new prompt to the cache
     usd += request(prompt, p.fresh_per_call, p.out_per_call); if (prompt > P.long_threshold) over++; sum += prompt; peak = Math.max(peak, prompt); prompt += g;
   }
   return { usd, compactions: n, first_call: first, over_long_share: over / calls, mean_prompt: sum / calls, peak };
@@ -34,6 +34,7 @@ const argentic = (calls, k = {}) => ({ usd: calls * S.argentic.usd.per_call_repr
 const events0 = prof.events, checkRows = [];
 for (const name of Object.keys(RULES)) { const calls = S[name].calls, m = rival(name, W0, calls); checkRows.push({ name, measured: S[name].usd.recorded, model: m.usd, mc: S[name].compactions.n, sc: m.compactions }); }
 const chk = argentic(S.argentic.calls); checkRows.unshift({ name: "argentic", measured: S.argentic.usd.repriced_from_tokens, model: chk.usd, mc: null, sc: null });
+for (const c of prof.checks ?? []) { const m = c.stack === "argentic" ? argentic(c.calls) : rival(c.stack, c.window, c.calls); checkRows.push({ name: `${c.stack} at ${c.window / 1000}K (not fitted)`, measured: c.usd, model: m.usd, mc: c.stack === "argentic" ? null : c.compactions, sc: c.stack === "argentic" ? null : m.compactions }); }
 const md = a.includes("--md"), out = [], say = (s = "") => out.push(s);
 
 // ---- 2. the estimate
@@ -45,7 +46,7 @@ const fmtW = (W) => (W >= 1e6 ? `${W / 1e6}M` : `${W / 1e3}K`);
 
 say(`# Multi-day cost estimate (free; makes no model call)\n`);
 say(`Model Claude Haiku 5.5, prices from tools/prices-haiku-5-5.json (a request over ${P.long_threshold.toLocaleString("en")} prompt tokens pays the long-context rates for the whole request). ${eph} events/hour, ${hours} working hours a day (${perDay.toLocaleString("en")} events a day), nights empty. Numbers come from the ${S.argentic.calls.toLocaleString("en")}-request ${W0 / 1000}K-window panel (${events0.toLocaleString("en")} events, one run per stack). The range is a judgement range, not a confidence interval.\n`);
-say(`## Does the model reproduce the panel it was fitted to? (100K window, same events)\n`);
+say(`## Does the model reproduce measured runs? (the 100K panel it was fitted to, then runs at other windows it was not fitted to)\n`);
 say(`| stack | measured | model | error | compactions measured / model |\n|---|---|---|---|---|`);
 for (const r of checkRows) say(`| ${r.name} | ${money(r.measured)} | ${money(r.model)} | ${(((r.model - r.measured) / r.measured) * 100).toFixed(0)}% | ${r.mc === null ? "n/a (bounded prompt)" : `${r.mc} / ${r.sc}`} |`);
 say();
