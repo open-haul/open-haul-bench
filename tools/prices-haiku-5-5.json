@@ -2,5 +2,6 @@
   "_source": "https://platform.claude.com/docs/en/about-claude/pricing (read 2026-11-05): Claude Haiku 5.5 is priced PER REQUEST by prompt length; a request's prompt length counts all input tokens including cache reads and cache writes. USD per 1,000,000 tokens. cache_write is the 5-minute write price.",
   "in": 0.10, "out": 0.50, "cache_hit": 0.01, "cache_write": 0.125,
   "long_threshold": 100000,
+  "argentic_step_usd": 0.001, "_argentic_step_source": "Argentic charges $1 per 1,000 agent steps after a plan's included steps; a step is one model reply the engine journaled (site lib/plans.ts WAKE_USD, hosted AUTUMN_WAKE_USD). It is billed by Argentic on top of the model spend, which is on the customer's own key. The monthly plan fee is not counted.",
   "long": { "in": 0.50, "out": 2.50, "cache_hit": 0.05, "cache_write": 0.625 }
 }

@@ -1,70 +1,62 @@
 #!/usr/bin/env node
 // Free cost estimator for multi-day shifts. It makes no model call and spends nothing.
-//   node tools/estimate-multiday-cost.mjs [--days 3,5,7,14,28] [--window 200000,1000000] [--events-per-hour 100] [--hours 12] [--stacks all] [--md]
-// Where the numbers come from: tools/multiday-profiles.json, written by tools/calibrate-profiles.mjs from the per-request metrics of a finished panel (the 100K-window panel is the one in the repo). Prices are tools/prices-haiku-5-5.json. Nothing here is typed in by hand except the compaction RULES below, which are what each stack documents, and the check against the measured panel is printed first so a wrong rule shows.
-// The model, per stack, one request at a time:
-//   prompt grows by the measured mean tokens per request; when it reaches the stack's trigger it drops to the stack's post-compaction size, and one extra request (the summariser) is paid at the size it summarised.
-//   cost of a request = cached tokens at the cache-read rate + the fresh tokens at the cache-write rate + the output; a request over 100,000 prompt tokens pays the long-context rates for the WHOLE request.
-// Argentic is priced as a bounded prompt: its measured cost per request on the panel, times requests. That the prompt stays bounded over days and weeks is the thing a multi-day run measures, so the high band adds 50%.
-// The range is the cheapest and dearest of three input settings (growth per request x0.8, x1, x1.3; requests per event x1, x1, x1.2; Argentic bound x1, x1, x1.5). It is a judgement range, not a confidence interval, and a compaction resets the prompt, so the slow setting is not always the cheapest. The panel is one run per stack.
-import { readFileSync } from "node:fs";
+//   node tools/estimate-multiday-cost.mjs [--days 3,5,7,14,28] [--window 200000,1000000] [--events-per-hour 60] [--hours 12] [--stacks all]
+// Where the numbers come from: tools/multiday-profiles.json, written by tools/calibrate-profiles.mjs from the per-request metrics of every finished run in tools/calibration-runs.json (12-hour panels at 100K and 200K, the 5-day
+// run at 200K, held-out stock runs), tools/prices-haiku-5-5.json, and the number of events the generator writes for the scenario (tools/cost-model.mjs holds the model). The checks against measured runs print first, with
+// the ones the fit never saw, so a wrong rule shows. The range is a judgement range, not a confidence interval. Argentic's step fee is its own line: model spend is on the customer's own key, the fee is what Argentic bills on top.
+import { PROFILES, PRICES, RIVALS, STACKS, fits, checks, central, estimate, predict, scenario, argenticRates } from "./cost-model.mjs";
+
 const a = process.argv.slice(2), arg = (n, d) => { const i = a.indexOf(`--${n}`); return i < 0 ? d : a[i + 1]; }, list = (s) => String(s).split(",").map(Number);
-const prof = JSON.parse(readFileSync(new URL("./multiday-profiles.json", import.meta.url), "utf8")), P = JSON.parse(readFileSync(new URL("./prices-haiku-5-5.json", import.meta.url), "utf8")), S = prof.stacks, W0 = prof.window_tokens;
-const rate = (p) => (p > P.long_threshold ? P.long : P), money = (x) => (x >= 100 ? `$${Math.round(x)}` : x >= 10 ? `$${x.toFixed(1)}` : `$${x.toFixed(2)}`);
-// what each stack documents about when it compacts and what it keeps, fitted to the measured panel at W0 (the offset or share is READ from the panel, only the rule's shape is stated)
-const RULES = {
-  deepagents: { trigger: (W, p, first) => W * (first ? p.compactions.first_before_share_of_window : p.compactions.before_share_of_window), after: (b, p, W) => W * (p.compactions.after_median / W0), note: "the first summarisation fires near the top of the window, later ones at a lower share (both measured at 100K and 200K); keeps about a fifth of the window" },
-  "claude-agent-sdk": { trigger: (W, p, first) => W - (W0 - p.compactions.before_median), after: (b, p) => p.compactions.after_median, note: "compacts a fixed margin under the window, keeps a summary of fixed size" },
-  letta: { trigger: (W, p, first) => W - (W0 - p.compactions.before_median), after: (b, p) => b * p.compactions.after_over_before, note: "slides a fixed margin under the window, keeps a share of the prompt" },
-};
-const SUMMARY_OUT = 4000;   // output tokens of one summarising request: an assumption, small next to the rest
-const request = (prompt, fresh, out) => { const r = rate(prompt), f = Math.min(prompt, fresh); return ((prompt - f) * r.cache_hit + f * r.cache_write + out * r.out) / 1e6; };
-// replay `calls` requests of one rival at window W
-function rival(name, W, calls, k = {}) {
-  const p = S[name], R = RULES[name], g = p.growth_per_call.mean_step * (k.g ?? 1); let trig = R.trigger(W, p, true); let prompt = p.first_prompt, usd = 0, n = 0, first = null, over = 0, sum = 0, peak = 0;
-  for (let i = 0; i < calls; i++) {
-    if (prompt >= trig) { usd += request(prompt, 0, SUMMARY_OUT); const after = R.after(prompt, p, W); trig = R.trigger(W, p, false); usd += request(after, after, p.out_per_call); n++; first ??= i; prompt = after; }   // the request after a compaction writes its whole new prompt to the cache
-    usd += request(prompt, p.fresh_per_call, p.out_per_call); if (prompt > P.long_threshold) over++; sum += prompt; peak = Math.max(peak, prompt); prompt += g;
-  }
-  return { usd, compactions: n, first_call: first, over_long_share: over / calls, mean_prompt: sum / calls, peak };
-}
-const argentic = (calls, k = {}) => ({ usd: calls * S.argentic.usd.per_call_repriced * (k.argentic ?? 1), mean_prompt: S.argentic.prompt.mean, peak: S.argentic.prompt.max });
-
-// ---- 1. the check: the same model, the panel's own settings, against what the panel measured
-const events0 = prof.events, checkRows = [];
-for (const name of Object.keys(RULES)) { const calls = S[name].calls, m = rival(name, W0, calls); checkRows.push({ name, measured: S[name].usd.recorded, model: m.usd, mc: S[name].compactions.n, sc: m.compactions }); }
-const chk = argentic(S.argentic.calls); checkRows.unshift({ name: "argentic", measured: S.argentic.usd.repriced_from_tokens, model: chk.usd, mc: null, sc: null });
-for (const c of prof.checks ?? []) { const m = c.stack === "argentic" ? argentic(c.calls) : rival(c.stack, c.window, c.calls); checkRows.push({ name: `${c.stack} at ${c.window / 1000}K (not fitted)`, measured: c.usd, model: m.usd, mc: c.stack === "argentic" ? null : c.compactions, sc: c.stack === "argentic" ? null : m.compactions }); }
-const md = a.includes("--md"), out = [], say = (s = "") => out.push(s);
-
-// ---- 2. the estimate
-const days = list(arg("days", "3,5,7,14,28")), windows = list(arg("window", "200000,1000000")), eph = Number(arg("events-per-hour", 100)), hours = Number(arg("hours", 12)), perDay = hours * eph, stacks = arg("stacks", "all") === "all" ? ["argentic", ...Object.keys(RULES)] : String(arg("stacks")).split(",");
-const BANDS = { low: { g: 0.8, cpe: 1, argentic: 1 }, central: { g: 1, cpe: 1, argentic: 1 }, high: { g: 1.3, cpe: 1.2, argentic: 1.5 } };
-const cost = (name, W, D, band) => { const p = S[name], b = BANDS[band], calls = Math.round(D * perDay * p.calls_per_event * b.cpe); return name === "argentic" ? { ...argentic(calls, b), calls } : { ...rival(name, W, calls, b), calls }; };
-const range = (name, W, D) => { const xs = ["low", "central", "high"].map((b) => cost(name, W, D, b).usd); return { c: xs[1], lo: Math.min(...xs), hi: Math.max(...xs) }; };
-const fmtW = (W) => (W >= 1e6 ? `${W / 1e6}M` : `${W / 1e3}K`);
+const money = (x) => (x >= 100 ? `$${Math.round(x)}` : x >= 10 ? `$${x.toFixed(1)}` : `$${x.toFixed(2)}`), pct = (m, x) => `${(((m - x) / x) * 100).toFixed(0)}%`, fmtW = (W) => (W >= 1e6 ? `${W / 1e6}M` : `${W / 1e3}K`);
+const days = list(arg("days", "3,5,7,14,28")), windows = list(arg("window", "200000,1000000")), eph = Number(arg("events-per-hour", 60)), hours = Number(arg("hours", 12)), stacks = arg("stacks", "all") === "all" ? STACKS : String(arg("stacks")).split(",");
+const out = [], say = (s = "") => out.push(s), runLabel = (x) => `${x.stack} ${x.id} (${fmtW(x.window)} window, ${x.events_per_hour}/h, ${x.days === 1 ? `${x.hours} h` : `${x.days} days`})`;
 
 say(`# Multi-day cost estimate (free; makes no model call)\n`);
-say(`Model Claude Haiku 5.5, prices from tools/prices-haiku-5-5.json (a request over ${P.long_threshold.toLocaleString("en")} prompt tokens pays the long-context rates for the whole request). ${eph} events/hour, ${hours} working hours a day (${perDay.toLocaleString("en")} events a day), nights empty. Numbers come from the ${S.argentic.calls.toLocaleString("en")}-request ${W0 / 1000}K-window panel (${events0.toLocaleString("en")} events, one run per stack). The range is a judgement range, not a confidence interval.\n`);
-say(`## Does the model reproduce measured runs? (the 100K panel it was fitted to, then runs at other windows it was not fitted to)\n`);
-say(`| stack | measured | model | error | compactions measured / model |\n|---|---|---|---|---|`);
-for (const r of checkRows) say(`| ${r.name} | ${money(r.measured)} | ${money(r.model)} | ${(((r.model - r.measured) / r.measured) * 100).toFixed(0)}% | ${r.mc === null ? "n/a (bounded prompt)" : `${r.mc} / ${r.sc}`} |`);
+say(`Model Claude Haiku 5.5, prices from tools/prices-haiku-5-5.json (a request over ${PRICES.long_threshold.toLocaleString("en")} prompt tokens pays the long-context rates for the whole request; no run has passed 279K, so prices above that are extrapolated). ${eph} events/hour, ${hours} working hours a day, nights empty. Events are counted from the scenario the generator writes (${scenario(hours, eph, 1).day1.toLocaleString("en")} on day 1 and ${scenario(hours, eph, 2).later.toLocaleString("en")} on each later day). The range is a judgement range, not a confidence interval. Fitted on ${PROFILES.runs.filter((x) => x.role === "fit").length} runs, checked on ${checks().length} it never saw.\n`);
+
+// 1. does the model reproduce measured runs
+say(`## Does the model reproduce measured runs?\n`);
+say(`Fitted runs replayed with their own profile (this only shows the model's shape is right):\n`);
+say(`| run | measured | model | error | compactions measured / model |\n|---|---|---|---|---|`);
+for (const x of PROFILES.runs.filter((y) => y.role === "fit")) { const r = predict(x, x); say(`| ${runLabel(x)} | ${money(r.measured)} | ${money(r.model)} | ${pct(r.model, r.measured)} | ${r.compactions === null ? "n/a (bounded prompt)" : `${r.measured_compactions} / ${r.compactions}`} |`); }
+say(`\nRuns predicted by a fit that did not contain them (this is the error to expect on a new condition; requests = events x the source's requests per event, except runs a spend cap cut short, which are compared at the request they reached):\n`);
+say(`| predicted run | fitted on | measured | model | error | compactions measured / model |\n|---|---|---|---|---|---|`);
+const held = []; for (const x of PROFILES.runs) for (const src of fits(x.stack)) { if (src === x) continue; if (x.role === "fit" && x.stack === "argentic" && src.days === 1 && x.days === 1) continue; held.push([x, src]); }
+for (const [x, src] of held) { const r = predict(x, src, { useCalls: x.complete === false }); say(`| ${runLabel(x)}${x.role === "check" ? " **held out**" : ""} | ${src.id} | ${money(r.measured)} | ${money(r.model)} | ${pct(r.model, r.measured)} | ${r.compactions === null ? "n/a" : `${r.measured_compactions} / ${r.compactions}`} |`); }
 say();
+
+// 2. estimates
+const hdr = stacks.map((s) => (s === "argentic" ? "argentic (model spend)" : s));
 for (const W of windows) {
-  say(`## ${fmtW(W)} window, ${eph} events/hour: cost of one run per stack (central; range across slow, central and fast growth)\n`);
-  say(`| days | ${stacks.join(" | ")} | all four |\n|---|${stacks.map(() => "---").join("|")}|---|`);
-  for (const D of days) { const cells = stacks.map((s) => range(s, W, D)), sum = (k) => cells.reduce((t, x) => t + x[k], 0); say(`| ${D} | ${cells.map((x) => `${money(x.c)} (${money(x.lo)} to ${money(x.hi)})`).join(" | ")} | ${money(sum("c"))} (${money(sum("lo"))} to ${money(sum("hi"))}) |`); }
+  say(`## ${fmtW(W)} window, ${eph} events/hour: cost of one run per stack (central; range)\n`);
+  say(`| days | ${hdr.join(" | ")} | argentic step fee | all (model spend) | all (with Argentic's fee) |\n|---|${stacks.map(() => "---").join("|")}|---|---|---|`);
+  for (const D of days) {
+    const cells = stacks.map((s) => estimate(s, W, D, eph, hours)), sum = (k) => cells.reduce((t, x) => t + x[k], 0), ai = stacks.indexOf("argentic"), fee = ai < 0 ? 0 : cells[ai].fee, feeHi = ai < 0 ? 0 : estimate("argentic", W, D, eph, hours).fee;
+    say(`| ${D} | ${cells.map((x) => `${money(x.usd)} (${money(x.lo)} to ${money(x.hi)})`).join(" | ")} | ${ai < 0 ? "n/a" : `${money(fee)} (${cells[ai].steps.toFixed(0)} steps)`} | ${money(sum("usd"))} (${money(sum("lo"))} to ${money(sum("hi"))}) | ${money(sum("usd") + fee)} |`);
+  }
   say();
-  say(`When each rival first compacts, and how many times it does (central): ${["deepagents", "claude-agent-sdk", "letta"].filter((s) => stacks.includes(s)).map((s) => { const D = Math.max(...days), c = cost(s, W, D, "central"); const callsPerDay = perDay * S[s].calls_per_event; return `${s} ${c.first_call === null ? `never within ${D} days` : `day ${(c.first_call / callsPerDay + 1).toFixed(1)}`}, ${c.compactions}x in ${D} days`; }).join("; ")}.\n`);
+  const D = Math.max(...days), rv = RIVALS.filter((s) => stacks.includes(s));
+  say(`When each rival first compacts, and how many times (central, ${D} days): ${rv.map((s) => { const c = estimate(s, W, D, eph, hours), cpd = scenario(hours, eph, 2).later * central(s).main_calls_per_event; return `${s} ${c.first_call === null ? `never within ${D} days` : `day ${(c.first_call / cpd + 1).toFixed(1)}`}, ${c.compactions}x`; }).join("; ")}.\n`);
+  if (stacks.includes("argentic")) { const rows = days.map((d) => { const A = estimate("argentic", W, d, eph, hours), others = rv.map((s) => estimate(s, W, d, eph, hours).usd); return `${d} days: ${others.length ? `the cheapest rival is ${(Math.min(...others) / A.usd).toFixed(1)}x Argentic's model spend, ${(Math.min(...others) / (A.usd + A.fee)).toFixed(1)}x with its step fee` : ""}`; }); say(`Rival bill against Argentic's: ${rows.join("; ")}.\n`); }
 }
-// staged plans: stop each rival the day it first compacts (and a little after), so the run shows the first hit, not the whole bill
+
+// 3. how the numbers are used
+const ac = central("argentic"), ar = argenticRates(ac);
+say(`## What the fit found (each of these was wrong or missing in the Nov 27 estimator)\n`);
+say(`- **Events were under-counted.** A day holds more events than hours x events per hour (${scenario(12, 60, 1).day1} on a 60/h day, not 720). The old estimator priced the 5-day run on 3,600 events; the scenario has ${scenario(12, 60, 5).events.toLocaleString("en")}. That alone was most of the $12.5 vs $17.47 miss. Events are now counted by the generator.`);
+{ const d = central("deepagents"), d2 = fits("deepagents"); say(`- **Tokens added per request depend on events per hour.** Deep Agents, first stretch: ${d2.map((x) => `${x.growth_per_call.first_stretch} at ${x.events_per_hour}/h`).join(", ")}; the old fit used the 250/h number for every run. The estimator reads a growth curve from the fitted runs instead.`); }
+{ const d = central("deepagents"), c = d.compactions; say(`- **Deep Agents' first summarisation fires when the real prompt reaches the window (${fits("deepagents").map((x) => x.compactions.first_share_of_window).join(", ")} of it in three runs), not at 0.75; later ones fire at ${fits("deepagents").map((x) => x.compactions.later_share_of_window).join(", ")}.** The "0.75" came from measuring the summariser's prompt, which holds ${Math.round(c.summarising_request.prompt_over_before * 100)}% of the prompt it summarises, not the prompt that tripped the rule.`); }
+{ const c = central("deepagents").compactions.summarising_request; say(`- **A Deep Agents summariser request is not cached and writes ${c.out} tokens.** It pays plain input at the request's tier, ${money(c.usd_median)} each at 200K (the old model priced it as a cache read and 4,000 tokens out). It matters at 1M, where one summariser request over 700K tokens is a few tenths of a dollar.`); }
+{ const l = fits("letta")[0].compactions; say(`- **Letta's prompt does not fall to a quarter after compaction.** The summariser request is a separate ${Math.round(l.summarising_request.prompt_over_before * 100)}%-sized request; the prompt then carries on at ${l.after_over_before} of what it was. The old model used the summariser's size as the new prompt, which is why it ran 16% low on Letta.`); }
+say(`- **Argentic's bill is flat over days.** Repriced cost per day on the 5-day run: ${ac.per_day.map((x) => `day ${x.day} ${money(x.repriced_usd)}`).join(", ")}; mean prompt ${ac.per_day.map((x) => `${(x.mean_prompt / 1000).toFixed(0)}K`).join(", ")}. The wire billed ${ac.usd.wire_over_repriced}x the repriced tokens (cache writes are not in the request metrics); that factor is applied. Nothing is measured past day 5.`);
+say(`- **Argentic's step fee is its own line.** ${money(PRICES.argentic_step_usd * 1000)} per 1,000 agent steps, a step being one model reply the engine journaled: ${ac.calls.toLocaleString("en")} steps on the 5-day run, ${money(ac.calls * PRICES.argentic_step_usd)}, against ${money(ac.usd.wire)} of model spend. The monthly plan fee is not counted.\n`);
+
+// 4. staged plans
 say(`## Cheaper ways to show the same thing\n`);
 for (const W of windows) {
-  const D = Math.max(...days), rows = ["deepagents", "claude-agent-sdk", "letta"].filter((s) => stacks.includes(s)).map((s) => { const c = cost(s, W, D, "central"), cpd = perDay * S[s].calls_per_event, firstDay = c.first_call === null ? null : c.first_call / cpd + 1; const stop = firstDay === null ? null : Math.ceil(firstDay + 2); return { s, firstDay, stop, usd: stop === null ? null : cost(s, W, stop, "central").usd, full: c.usd }; });
-  say(`- **${fmtW(W)} window, stop each rival two days after it first compacts** (Argentic runs the longest stop): ${rows.map((r) => `${r.s} ${r.stop === null ? "no compaction in range" : `day ${r.stop} for ${money(r.usd)} (vs ${money(r.full)} for ${D} days)`}`).join("; ")}.`);
+  const D = Math.max(...days), rows = RIVALS.filter((s) => stacks.includes(s)).map((s) => { const c = estimate(s, W, D, eph, hours), cpd = scenario(hours, eph, 2).later * central(s).main_calls_per_event, firstDay = c.first_call === null ? null : c.first_call / cpd + 1, stop = firstDay === null ? null : Math.ceil(firstDay + 2); return { s, stop, usd: stop === null ? null : estimate(s, W, stop, eph, hours).usd, full: c.usd }; });
+  say(`- **${fmtW(W)} window, stop each rival two days after it first compacts**: ${rows.map((r) => `${r.s} ${r.stop === null ? "no compaction in range" : `day ${r.stop} for ${money(r.usd)} (vs ${money(r.full)} for ${D} days)`}`).join("; ")}.`);
 }
-say(`- **Fewer stacks**: Argentic is ${money(cost("argentic", windows[0], Math.max(...days), "central").usd)} for ${Math.max(...days)} days whatever the window, so the bill is the rivals. One rival (the cheapest on the table) plus Argentic is the floor for a comparison.`);
-say(`- **Sparser events** do not cut a rival's bill at a big window: a rival compacts when its prompt reaches the trigger, which takes the same number of requests however they are spread over days. They only stretch the calendar. Cutting requests per event (a shorter shift each day, fewer questions) is what lowers it.`);
-say(`- **A smaller window is the cheap stepping stone**: at 200K a rival compacts inside the first day and keeps compacting, so the same question (what happens after many compactions) costs a fraction of the 1M price.`);
-say(`\n_Assumptions that move the bill: requests per event (measured ${["deepagents", "claude-agent-sdk", "letta"].map((s) => `${s} ${S[s].calls_per_event}`).join(", ")}), tokens added per request (${["deepagents", "claude-agent-sdk", "letta"].map((s) => `${s} ${S[s].growth_per_call.mean_step.toFixed(0)}`).join(", ")}), the summariser output (${SUMMARY_OUT} tokens, assumed), and that Argentic's prompt stays at its measured size over weeks (unmeasured). A paid run needs a typed cap; nothing here starts one._`);
+say(`- **Fewer stacks**: Argentic's bill is small next to any rival's, so one rival plus Argentic is the floor for a comparison.`);
+say(`\n_Assumptions that move the bill: tokens added per request (${["deepagents", "claude-agent-sdk", "letta"].map((s) => `${s} ${central(s).growth_per_call.first_stretch} then ${central(s).growth_per_call.later ?? "-"}`).join(", ")}), requests per event, and for the Claude Agent SDK and Letta that no multi-day run exists (they are fitted on 12-hour panels at 250 events/hour, with one events/hour each, so the growth curve is flat and the high band carries the rise Deep Agents showed). A paid run needs a typed cap; nothing here starts one._`);
 console.log(out.join("\n"));
