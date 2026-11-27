@@ -1,10 +1,12 @@
 {
-  "spec_version": "0.3.0",
+  "spec_version": "0.4.0",
   "grade.mjs": "98b21e2db8805bf49d7222ecbb553ffa91e5438e50adf57992abe8bf7c432bec",
-  "world.mjs": "c708cebfff62f426328174bd7840afac02cabd18a4c2056be71b74dcf7f2a727",
-  "gen.mjs": "4ab6ddf7bba3221b7c1ca19360714aa4450e62b29cb4b953178717476452b69d",
+  "world.mjs": "7fbbb3a8f800fa5b59a1cdff84b4592335ddbf74106f3c3d8f767140fd8ef927",
+  "gen.mjs": "22b1a3b04ecff4a010ff9ea35dc5591377bc0b4059a6b31e5c6ca9b5e0f509d1",
   "util.mjs": "984a150e7144db22056af363eab0855b43b9cea9a1f48c916f3ddeaa7690395d",
   "prompt": "42903e2d31d0e020e455735c018fc3c221e1ab4b044d21b062ad351f6a1015a0",
   "extension.mjs": "830d34da101de1063fc6260c58df02d8471606f14b04717dfb83bedfdfb13f3e",
-  "extension_version": "0.1.0"
+  "extension_version": "0.1.0",
+  "multiday.mjs": "2d0fab7ca3bc43bd5726b533bd3749c8dafed072920ddbc2d1f22e67519b09a0",
+  "multiday_version": "0.1.0"
 }
