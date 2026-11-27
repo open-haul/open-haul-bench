@@ -22,10 +22,10 @@ import { setupRun, Stop, ContextOverflow } from "./drive-core.mjs";
 import { system_ls, task_ls, nudge_ls } from "./prompt.mjs";
 export { Stop, ContextOverflow };
 
-export async function runAdapter({ adapter, name, root, seed = 20261201, hours = 12, dense = false, eventsPerHour = 100, pack = null, tracks = [], capUsd, maxMs, maxCalls, maxContext = null, modelId = process.env.MODEL_ID ?? "claude-haiku-5-5", apiKey = process.env.MODEL_KEY ?? process.env.ANTHROPIC_API_KEY, baseUrl = process.env.UPSTREAM ?? "https://api.anthropic.com", quiet = false }) {
+export async function runAdapter({ adapter, name, root, seed = 20261201, hours = 12, dense = false, eventsPerHour = 100, pack = null, tracks = [], days = 1, capUsd, maxMs, maxCalls, maxContext = null, modelId = process.env.MODEL_ID ?? "claude-haiku-5-5", apiKey = process.env.MODEL_KEY ?? process.env.ANTHROPIC_API_KEY, baseUrl = process.env.UPSTREAM ?? "https://api.anthropic.com", quiet = false }) {
   if (!adapter || typeof adapter.run !== "function" || !/^[A-Za-z0-9_-]{1,40}$/.test(adapter.name ?? "")) throw new Error("an adapter needs a name (letters, digits, - and _) and a run() function");
   let spentUsd = 0, version = "unknown"; try { version = String((await adapter.version?.()) ?? "unknown"); } catch { /* keep unknown */ }
-  const run = setupRun({ root, name, seed, hours, dense, eventsPerHour, pack, tracks, entry: adapter.name, capUsd, maxMs, maxCalls, maxContext, spent: () => spentUsd, quiet, config: { adapter: adapter.name, adapter_version: version, model_id: modelId } });
+  const run = setupRun({ root, name, seed, hours, dense, eventsPerHour, pack, tracks, days, entry: adapter.name, capUsd, maxMs, maxCalls, maxContext, spent: () => spentUsd, quiet, config: { adapter: adapter.name, adapter_version: version, model_id: modelId } });
   const tools = run.world.schemas().map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema, execute: async (args) => run.exec(t.name, args) }));
   const budget = { capUsd, spent: () => spentUsd, add: (usd) => { if (Number.isFinite(usd) && usd > 0) spentUsd += usd; }, beforeCall: () => { run.beforeCall(); run.noteModelCall(); },
     report: (u = {}) => { if (Number.isFinite(u.usd) && u.usd > 0) spentUsd += u.usd; run.recordUsage(u); }, window: (n) => run.checkWindow(n) };
