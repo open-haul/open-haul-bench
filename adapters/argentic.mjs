@@ -11,14 +11,14 @@ const HAIKU_PRICES = { in: 0.1, out: 0.5, cache_hit: 0.01, cache_write: 0.125 };
 const maybeJson = (t) => { if (typeof t === "string" && /^[{\[]/.test(t)) { try { return JSON.parse(t); } catch { /* keep the text */ } } return t; };
 export function clientVersion() { try { const entry = createRequire(import.meta.url).resolve("@argentic-ai/client"), root = dirname(dirname(entry)); return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version; } catch { return "unknown"; } }
 
-export async function runArgentic({ name, root, seed = 20261201, hours = 12, dense = false, pack = null, tracks = [], maxContext = null, capUsd, maxMs, maxCalls, maxSteps = 4000, maxTurns = 1, baseUrl = process.env.ARGENTIC_BASE_URL ?? "https://api.getargentic.com", apiKey = process.env.ARGENTIC_API_KEY,
+export async function runArgentic({ name, root, seed = 20261201, hours = 12, dense = false, eventsPerHour = 100, pack = null, tracks = [], maxContext = null, capUsd, maxMs, maxCalls, maxSteps = 4000, maxTurns = 1, baseUrl = process.env.ARGENTIC_BASE_URL ?? "https://api.getargentic.com", apiKey = process.env.ARGENTIC_API_KEY,
   modelKey = process.env.MODEL_KEY, provider = process.env.MODEL_PROVIDER ?? "anthropic", modelId = process.env.MODEL_ID ?? "claude-haiku-5-5", prices = HAIKU_PRICES, providerWaitMs = 15000, maxProviderRetries = 30, maxSegments = 50, quiet = false }) {
   if (!apiKey) throw new Error("ARGENTIC_API_KEY is not set");
   if (!modelKey) throw new Error("MODEL_KEY is not set");
   const { Argentic, run: runAgent } = await import("@argentic-ai/client");
   const model = { provider, id: modelId, prices: typeof prices === "string" ? JSON.parse(prices) : prices };
   const wakeSpend = new Map(), spent = () => { let s = 0; for (const v of wakeSpend.values()) s += v; return s; };
-  const run = setupRun({ root, name, seed, hours, dense, pack, tracks, maxContext, entry: "argentic-hosted", capUsd, maxMs, maxCalls, spent, quiet, config: { client: "@argentic-ai/client", client_version: clientVersion(), base_url: baseUrl, model, max_turns: maxTurns, resume: "none (run is void if the process dies)" } });
+  const run = setupRun({ root, name, seed, hours, dense, eventsPerHour, pack, tracks, maxContext, entry: "argentic-hosted", capUsd, maxMs, maxCalls, spent, quiet, config: { client: "@argentic-ai/client", client_version: clientVersion(), base_url: baseUrl, model, max_turns: maxTurns, resume: "none (run is void if the process dies)" } });
   mkdirSync(run.P("private"), { recursive: true });
   const metricsFile = run.P("wake-metrics.jsonl"), rows = []; let hosted429 = 0;
   const patientFetch = async (url, init) => { for (;;) { const r = await fetch(url, init); if (r.status !== 429) return r; hosted429++; const ra = Number(r.headers.get("retry-after")) || 5; await r.body?.cancel().catch(() => {}); run.event({ type: "hosted_429", wait_s: ra, total: hosted429 }); await sleep(ra * 1000 + 250); } };

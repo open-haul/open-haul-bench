@@ -35,11 +35,14 @@ export default {
       const out = await t.execute(args ?? {}); return typeof out === "string" ? out : JSON.stringify(out);
     }, { name: t.name, description: t.description, schema: t.input_schema }));
     const llm = new ChatAnthropic({ model: model.id, apiKey: gw.apiKey, anthropicApiUrl: gw.url, maxTokens: 2048, maxRetries: 6 });
+    // Window condition (RIVAL_WINDOW=<tokens>, off by default): tell the package the model's input window is smaller. Its own defaults then derive the trigger (85%) and the kept tail (10%) from it. Nothing else changes.
+    const windowTokens = process.env.RIVAL_WINDOW ? Number(process.env.RIVAL_WINDOW) : null;
+    if (windowTokens) Object.defineProperty(llm, "profile", { value: { ...llm.profile, maxInputTokens: windowTokens }, configurable: true });
     const defaults = computeSummarizationDefaults(llm);
     const agent = createDeepAgent({ model: llm, tools: lcTools, systemPrompt: system, checkpointer: new MemorySaver() });
     const thread = { configurable: { thread_id: `longshift-${Date.now()}` }, recursionLimit: 100000, signal: abort.signal };
     event({ type: "rival_config", rival: "deepagents", versions: versions(), mode: gw.mode, model: model.id, profile_max_input_tokens: llm.profile?.maxInputTokens ?? null,
-      summarization: { trigger: defaults.trigger, keep: defaults.keep, truncate_args: defaults.truncateArgsSettings, source: "computeSummarizationDefaults(llm), unchanged" },
+      summarization: { trigger: defaults.trigger, keep: defaults.keep, truncate_args: defaults.truncateArgsSettings, source: windowTokens ? `computeSummarizationDefaults(llm), unchanged, with the profile window set to ${windowTokens}` : "computeSummarizationDefaults(llm), unchanged" }, window_tokens: windowTokens,
       file_offload: "shipped filesystem middleware (tool results over 20,000 tokens), StateBackend", prompt_caching: "shipped anthropicPromptCachingMiddleware", recursion_limit: 100000 });
     // the built-in tools do not pass through the world-tool guard, so also meter on a clock
     const timer = setInterval(() => { try { const s = gw.drain(budget); if (s) onStop(s); } catch (e) { onStop(e instanceof Stop ? e : new Stop(`meter error: ${String(e?.message ?? e).slice(0, 120)}`)); } }, 1000);
