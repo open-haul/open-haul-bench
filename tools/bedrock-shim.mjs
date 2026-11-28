@@ -5,6 +5,7 @@
 //   node tools/bedrock-shim.mjs [--port 4871] [--model global.anthropic.claude-haiku-5-5] [--region us-east-1]
 // env: BEDROCK_MODEL_ID, AWS_REGION, BEDROCK_ENDPOINT (tests: a fake server), AWS_BEARER_TOKEN_BEDROCK (optional bearer key: when absent the request is sent unsigned, which is right
 // where an egress proxy injects the AWS credential itself). On a laptop with SigV4 credentials only, set AWS_BEARER_TOKEN_BEDROCK or put a signing proxy in front.
+// SHIM_HOST (default 127.0.0.1): the address to listen on. tools/outsider/run-sandboxed.sh sets 0.0.0.0 inside its own container so a keyless runner on an internal network can reach it.
 // Node 22 note: for outbound HTTPS through an HTTPS_PROXY, start node with NODE_USE_ENV_PROXY=1.
 // What it does: POST /v1/messages (stream or not) -> /model/<id>/invoke or /invoke-with-response-stream, decoding Bedrock's binary event stream back into Anthropic SSE events.
 // The `model` a client asks for is replaced by the one Bedrock model id (every arm runs the same model); the requested name is echoed back and kept in the x-requested-model response header.
@@ -41,7 +42,7 @@ export function* decodeEventStream(buf) {
 const errType = (status) => (status === 429 ? "rate_limit_error" : status === 401 || status === 403 ? "authentication_error" : status === 400 ? "invalid_request_error" : status === 404 ? "not_found_error" : status === 529 || status === 503 ? "overloaded_error" : "api_error");
 const sendError = (res, status, message) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: errType(status), message: String(message).slice(0, 500) } })); };
 
-export function startBedrockShim({ port = 0, modelId = process.env.BEDROCK_MODEL_ID ?? DEFAULT_MODEL, region = process.env.AWS_REGION ?? "us-east-1", endpoint = process.env.BEDROCK_ENDPOINT, token = process.env.AWS_BEARER_TOKEN_BEDROCK, fetchImpl = fetch } = {}) {
+export function startBedrockShim({ port = 0, modelId = process.env.BEDROCK_MODEL_ID ?? DEFAULT_MODEL, region = process.env.AWS_REGION ?? "us-east-1", endpoint = process.env.BEDROCK_ENDPOINT, token = process.env.AWS_BEARER_TOKEN_BEDROCK, fetchImpl = fetch, host = process.env.SHIM_HOST ?? "127.0.0.1" } = {}) {
   const base = (endpoint ?? `https://bedrock-runtime.${region}.amazonaws.com`).replace(/\/$/, "");
   const stats = { requests: 0, errors: 0, bedrock_ms: 0 };
   const server = http.createServer(async (req, res) => {
@@ -86,7 +87,7 @@ export function startBedrockShim({ port = 0, modelId = process.env.BEDROCK_MODEL
     } catch (e) { stats.errors++; res.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "api_error", message: `stream broke: ${e.message}` } })}\n\n`); }
     res.end();
   });
-  return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({ server, port: server.address().port, url: `http://127.0.0.1:${server.address().port}`, modelId, stats, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) })));
+  return new Promise((resolve) => server.listen(port, host, () => resolve({ server, port: server.address().port, url: `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${server.address().port}`, modelId, stats, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) })));
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

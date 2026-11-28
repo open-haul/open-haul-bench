@@ -1,0 +1,12 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AttachTheDenyPolicyToTheOutsiderUserOnly",
+      "Effect": "Allow",
+      "Action": ["iam:AttachUserPolicy", "iam:DetachUserPolicy"],
+      "Resource": "arn:aws:iam::__ACCOUNT__:user/__USER__",
+      "Condition": { "ArnEquals": { "iam:PolicyARN": "arn:aws:iam::__ACCOUNT__:policy/__DENY_POLICY__" } }
+    }
+  ]
+}

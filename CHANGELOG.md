@@ -1,5 +1,15 @@
 # Changelog
 
+## Safe runs of outside adapters (tools and docs only, no spec change)
+
+Nothing the scorer, generator, world, brief or any recorded result reads has changed: `core/`, `datasets/`, `legacy/`, `adapters/` and `SPEC.sha256.json` are byte-identical. The only code change to an existing file is an optional `SHIM_HOST` setting on `tools/bedrock-shim.mjs` (default unchanged, loopback).
+
+- `OUTSIDER-RUNS.md`: the review steps, the separate Bedrock-only key, the sandbox, and what none of it covers.
+- `tools/review-adapter.mjs`: a free first pass over an adapter folder (install scripts, non-registry dependencies, spawning, `eval`, environment and credential reads, unknown hosts). It runs nothing from the folder.
+- `tools/outsider/provision-aws.sh` and its policy files: an IAM user that can only invoke the bench model, a 30 day key written to Doppler without printing it, a monthly budget with an automatic cutoff.
+- `tools/outsider/run-sandboxed.sh`: runs an adapter in a read-only container on a network with no internet, with the key held only by a second container that proxies one model.
+- `test/27-outsider-safety.mjs` (36 offline checks): no workflow uses `pull_request_target`, `workflow_run`, a secret or a write permission; the IAM policy allows only model invocation; the sandbox script keeps the key out of the runner; the review scan catches the usual tricks.
+
 ## A submission path: card, check, CI (tools and docs only, no spec change)
 
 Nothing the scorer, generator, world, brief or any recorded result reads has changed: `core/`, `datasets/`, `legacy/`, `adapters/` and `SPEC.sha256.json` are byte-identical.
