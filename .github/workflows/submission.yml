@@ -2,7 +2,8 @@ name: submission
 # Runs on a pull request that touches submissions/. The same check an outsider runs locally: tools/check-submission.mjs.
 on:
   pull_request:
-    paths: ["submissions/**"]
+    # the folder's own README and card template are maintainer files, not a submission
+    paths: ["submissions/**", "!submissions/README.md", "!submissions/SUBMISSION.template.md"]
 permissions:
   contents: read
 jobs:
