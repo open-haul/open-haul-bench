@@ -1,24 +1,24 @@
 // Entry A: Argentic, driven only through the public @argentic-ai/client (the calls any customer makes).
 // This process carries out the tool calls the client hands back and sends their results with the next call.
 // Spend comes from the spent_usd the client reports. No resume: the world lives in this process, so a crashed run is void and restarts under a new name.
-import { appendFileSync, readFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { createRequire } from "node:module";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { ensureClient, installedClientVersion } from "./argentic-client.mjs";
 import { setupRun, Stop, sleep } from "../core/drive-core.mjs";
 import { system_ls as system_p1, task_ls as task_p1, nudge_ls as nudge_p1 } from "../core/prompt.mjs";
 
 const HAIKU_PRICES = { in: 0.1, out: 0.5, cache_hit: 0.01, cache_write: 0.125 };
 const maybeJson = (t) => { if (typeof t === "string" && /^[{\[]/.test(t)) { try { return JSON.parse(t); } catch { /* keep the text */ } } return t; };
-export function clientVersion() { try { const entry = createRequire(import.meta.url).resolve("@argentic-ai/client"), root = dirname(dirname(entry)); return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version; } catch { return "unknown"; } }
+export function clientVersion() { return installedClientVersion() ?? "unknown"; }
 
 export async function runArgentic({ name, root, seed = 20261201, hours = 12, dense = false, eventsPerHour = 100, pack = null, tracks = [], days = 1, maxContext = null, capUsd, maxMs, maxCalls, maxSteps = 4000, maxTurns = 1, baseUrl = process.env.ARGENTIC_BASE_URL ?? "https://api.getargentic.com", apiKey = process.env.ARGENTIC_API_KEY,
   modelKey = process.env.MODEL_KEY, provider = process.env.MODEL_PROVIDER ?? "anthropic", modelId = process.env.MODEL_ID ?? "claude-haiku-5-5", prices = HAIKU_PRICES, providerWaitMs = 15000, maxProviderRetries = 30, maxSegments = 50, quiet = false }) {
   if (!apiKey) throw new Error("ARGENTIC_API_KEY is not set");
   if (!modelKey) throw new Error("MODEL_KEY is not set");
+  const picked = ensureClient(); // resolved once, here; the run never changes client afterwards
   const { Argentic, run: runAgent } = await import("@argentic-ai/client");
   const model = { provider, id: modelId, prices: typeof prices === "string" ? JSON.parse(prices) : prices };
   const wakeSpend = new Map(), spent = () => { let s = 0; for (const v of wakeSpend.values()) s += v; return s; };
-  const run = setupRun({ root, name, seed, hours, dense, eventsPerHour, pack, tracks, days, maxContext, entry: "argentic-hosted", capUsd, maxMs, maxCalls, spent, quiet, config: { client: "@argentic-ai/client", client_version: clientVersion(), base_url: baseUrl, model, max_turns: maxTurns, resume: "none (run is void if the process dies)" } });
+  const run = setupRun({ root, name, seed, hours, dense, eventsPerHour, pack, tracks, days, maxContext, entry: "argentic-hosted", capUsd, maxMs, maxCalls, spent, quiet, config: { client: "@argentic-ai/client", client_version: picked.version, client_version_source: picked.source, base_url: baseUrl, model, max_turns: maxTurns, resume: "none (run is void if the process dies)" } });
   mkdirSync(run.P("private"), { recursive: true });
   const metricsFile = run.P("wake-metrics.jsonl"), rows = []; let hosted429 = 0;
   const patientFetch = async (url, init) => { for (;;) { const r = await fetch(url, init); if (r.status !== 429) return r; hosted429++; const ra = Number(r.headers.get("retry-after")) || 5; await r.body?.cancel().catch(() => {}); run.event({ type: "hosted_429", wait_s: ra, total: hosted429 }); await sleep(ra * 1000 + 250); } };
