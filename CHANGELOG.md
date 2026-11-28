@@ -1,5 +1,13 @@
 # Changelog
 
+## Reviewing outside adapters (tools and docs only, no spec change)
+
+Nothing the scorer, generator, world, brief or any recorded result reads has changed: `core/`, `datasets/`, `legacy/`, `adapters/`, `tools/bedrock-shim.mjs` and `SPEC.sha256.json` are byte-identical.
+
+- `REVIEWING-ADAPTERS.md`: contributors score on their own keys, a maintainer reviews before merge, and we re-run only reviewed adapters through the normal Bedrock path with a scrubbed environment.
+- `tools/review-adapter.mjs`: a free first pass over an adapter folder (install scripts, non-registry dependencies, spawning, `eval`, environment and credential reads, unknown hosts). It runs nothing from the folder.
+- `test/27-outsider-safety.mjs`: no workflow uses `pull_request_target`, `workflow_run`, a secret, a write permission or a self-hosted runner; the review scan catches the usual tricks.
+
 ## A submission path: card, check, CI (tools and docs only, no spec change)
 
 Nothing the scorer, generator, world, brief or any recorded result reads has changed: `core/`, `datasets/`, `legacy/`, `adapters/` and `SPEC.sha256.json` are byte-identical.
