@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Email the maintainers
+    url: mailto:open-haul@getargentic.com
+    about: Questions, or to hand the benchmark over to a neutral home

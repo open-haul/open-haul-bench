@@ -1,0 +1,32 @@
+name: submission
+# Runs on a pull request that touches submissions/. The same check an outsider runs locally: tools/check-submission.mjs.
+on:
+  pull_request:
+    paths: ["submissions/**"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: a submission changes nothing outside its own folder
+        run: |
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          echo "$changed"
+          outside=$(echo "$changed" | grep -v '^submissions/[a-z0-9][a-z0-9-]*/' || true)
+          if [ -n "$outside" ]; then
+            echo "::error::A submission PR may only add files under submissions/<slug>/. Also changed: $outside"
+            exit 1
+          fi
+          [ "$(echo "$changed" | cut -d/ -f2 | sort -u | wc -l)" = "1" ] || { echo "::error::One submission per pull request"; exit 1; }
+      - name: check the submission
+        run: |
+          slug=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f2 | sort -u | head -1)
+          node tools/check-submission.mjs "submissions/$slug" --table | tee out.txt
+          { echo '```'; cat out.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

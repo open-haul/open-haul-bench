@@ -1,0 +1,28 @@
+name: Run mine differently
+description: A stack in adapters/rivals was run at a setting you think is unfair to it
+labels: ["rival-config"]
+body:
+  - type: input
+    id: stack
+    attributes:
+      label: Which stack and which adapter
+      placeholder: "for example adapters/rivals/letta.mjs"
+    validations:
+      required: true
+  - type: textarea
+    id: setting
+    attributes:
+      label: The setting you would use
+      description: The exact option or config, and the vendor page that recommends it.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why the published run understates the system
+  - type: input
+    id: relationship
+    attributes:
+      label: Your relationship to the stack
+    validations:
+      required: true
