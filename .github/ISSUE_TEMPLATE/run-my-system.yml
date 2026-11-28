@@ -1,0 +1,35 @@
+name: Run my system
+description: Ask for your system to be added to OpenHaulBench, or say you will write the adapter yourself
+labels: ["help wanted"]
+body:
+  - type: input
+    id: system
+    attributes:
+      label: System and version
+      placeholder: "for example Mem0 1.2.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: who
+    attributes:
+      label: Who writes the adapter?
+      options:
+        - I will, and I will open the PR
+        - I would like help writing it
+        - I am asking for someone else to run it
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: The setup you want measured
+      description: The configuration the system's own documentation recommends, with the doc page. If its defaults and its recommended setup differ, name both.
+    validations:
+      required: true
+  - type: input
+    id: relationship
+    attributes:
+      label: Your relationship to the system
+      placeholder: "maintainer / works at the vendor / user / none"
+    validations:
+      required: true

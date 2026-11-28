@@ -1,6 +1,6 @@
 # Contributing
 
-Welcome: scorer holes, wrong answer keys, unclear wording, new suites, adapters, docs.
+Welcome: scorer holes, wrong answer keys, unclear wording, new suites, adapters, docs. To enter a system, see SUBMITTING.md.
 
 ## Reporting a hole in the scorer
 
