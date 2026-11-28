@@ -50,6 +50,8 @@ export ARGENTIC_API_KEY=<your Argentic API key>
 node run.mjs argentic --name argentic-s1 --seed 20261201 --hours 12 --cap-usd 5
 ```
 
+**Client version.** When an Argentic run starts, the bench looks up the newest published `@argentic-ai/client` once, installs exactly that version if it is not already there, and uses it for the whole run. The exact version is written to `run.json` as `client_version`, with `client_version_source` saying how it was chosen. A run never changes client part-way through, and a result can be reproduced by pinning the version it recorded: `ARGENTIC_CLIENT_VERSION=0.10.0 node run.mjs argentic ...` (exact versions only; `latest` and ranges are refused). Runs on different client versions are different experiments: compare them only with the version printed beside each number.
+
 The hosted engine is updated over time, and the run records the client version and base URL but not the engine version behind them. Compare your result with a published number only if you ran at about the same time, and note the engine version printed beside the published number.
 
 Claude Agent SDK, LangChain and Letta (setup is in `adapters/rivals/README.md`):
