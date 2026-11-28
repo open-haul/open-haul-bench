@@ -13,6 +13,7 @@
 import http from "node:http";
 
 const DEFAULT_MODEL = "global.anthropic.claude-haiku-5-5";
+const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
 // ---- AWS event stream -> chunks. Frame: total length u32, headers length u32, prelude crc u32, headers, payload, message crc u32. Lenient: the CRCs are not checked.
 export function* decodeEventStream(buf) {
@@ -41,7 +42,7 @@ export function* decodeEventStream(buf) {
 const errType = (status) => (status === 429 ? "rate_limit_error" : status === 401 || status === 403 ? "authentication_error" : status === 400 ? "invalid_request_error" : status === 404 ? "not_found_error" : status === 529 || status === 503 ? "overloaded_error" : "api_error");
 const sendError = (res, status, message) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: errType(status), message: String(message).slice(0, 500) } })); };
 
-export function startBedrockShim({ port = 0, modelId = process.env.BEDROCK_MODEL_ID ?? DEFAULT_MODEL, region = process.env.AWS_REGION ?? "us-east-1", endpoint = process.env.BEDROCK_ENDPOINT, token = process.env.AWS_BEARER_TOKEN_BEDROCK, fetchImpl = fetch } = {}) {
+export function startBedrockShim({ port = 0, modelId = process.env.BEDROCK_MODEL_ID ?? DEFAULT_MODEL, region = process.env.AWS_REGION ?? "us-east-1", endpoint = process.env.BEDROCK_ENDPOINT, token = process.env.AWS_BEARER_TOKEN_BEDROCK, fetchImpl = fetch, thinkingBinding = process.env.BEDROCK_THINKING_BINDING } = {}) {
   const base = (endpoint ?? `https://bedrock-runtime.${region}.amazonaws.com`).replace(/\/$/, "");
   const stats = { requests: 0, errors: 0, bedrock_ms: 0 };
   const server = http.createServer(async (req, res) => {
@@ -57,6 +58,10 @@ export function startBedrockShim({ port = 0, modelId = process.env.BEDROCK_MODEL
     if (path !== "/v1/messages") return sendError(res, 404, `no route POST ${path}`);
     const requested = j.model ?? null, stream = !!j.stream, { model: _m, stream: _s, ...rest } = j;
     const beta = String(req.headers["anthropic-beta"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    // Opt-in (BEDROCK_THINKING_BINDING=drop_block, or the thinkingBinding option): ask the API to drop a thinking block whose signature is bound to a prefix that is no longer in the request, instead of refusing with a 400.
+    // This is the remedy the API's own error names (thinking.block_binding.prefix_mismatch_behavior, beta thinking-binding-controls-2026-08-01). The model's default is adaptive thinking, so an absent `thinking` becomes `adaptive`: same behaviour, plus the binding rule. A request that disables thinking is left alone.
+    const bindingOn = thinkingBinding && rest.thinking?.type !== "disabled";
+    if (bindingOn) { rest.thinking = { type: "adaptive", ...(rest.thinking ?? {}), block_binding: { prefix_mismatch_behavior: thinkingBinding } }; beta.push(THINKING_BINDING_BETA); }
     const payload = { ...rest, anthropic_version: "bedrock-2023-05-31", ...(beta.length || rest.anthropic_beta ? { anthropic_beta: [...new Set([...(rest.anthropic_beta ?? []), ...beta])] } : {}) };
     const url = `${base}/model/${encodeURIComponent(modelId)}/${stream ? "invoke-with-response-stream" : "invoke"}`;
     const headers = { "content-type": "application/json", accept: stream ? "application/vnd.amazon.eventstream" : "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) };
