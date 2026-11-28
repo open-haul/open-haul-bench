@@ -18,7 +18,7 @@ export function startFakeBedrock({ port = 0, onRequest = null, failFirst = 0, re
     const m = req.url.match(/^\/model\/([^/]+)\/(invoke|invoke-with-response-stream)$/);
     if (!m) { res.writeHead(404); return res.end("{}"); }
     const j = JSON.parse(b.toString("utf8")), stream = m[2] === "invoke-with-response-stream"; n++;
-    seen.push({ n, model: decodeURIComponent(m[1]), stream, has_tools: !!j.tools?.length, beta: j.anthropic_beta ?? null, version: j.anthropic_version, bad_fields: ["model", "stream"].filter((k) => k in j), auth: req.headers.authorization ?? null });
+    seen.push({ n, model: decodeURIComponent(m[1]), stream, has_tools: !!j.tools?.length, beta: j.anthropic_beta ?? null, thinking: j.thinking ?? null, version: j.anthropic_version, bad_fields: ["model", "stream"].filter((k) => k in j), auth: req.headers.authorization ?? null });
     onRequest?.(j, req);
     if (n <= failFirst) { res.writeHead(429, { "content-type": "application/json" }); return res.end(JSON.stringify({ message: "Too many requests" })); }
     const txt = JSON.stringify(j.messages ?? []), prompt = Math.ceil((txt.length + JSON.stringify(j.system ?? "").length + JSON.stringify(j.tools ?? "").length) / 3.6);

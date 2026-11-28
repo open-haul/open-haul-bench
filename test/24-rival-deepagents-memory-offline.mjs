@@ -17,7 +17,7 @@ const fake = await startFakeBedrock({
     if (n === 10 && offered.includes("write_file")) return use("toolu_mem_3", "write_file", { file_path: "/scratch/not-memory.md", content: "scratch\n" });
   },
 });
-process.env.BEDROCK_ENDPOINT = fake.url; process.env.RIVAL_MODE = "bedrock"; process.env.AWS_BEARER_TOKEN_BEDROCK = "test";
+process.env.BEDROCK_ENDPOINT = fake.url; process.env.RIVAL_MODE = "bedrock"; process.env.THINKING_BINDING = "drop_block"; process.env.AWS_BEARER_TOKEN_BEDROCK = "test";
 const { default: adapter } = await import("../adapters/rivals/deepagents-memory.mjs");
 const r = await runAdapter({ adapter, root, name: "dam-offline", seed: 20261201, hours: 3, quiet: true, modelId: "claude-haiku-5-5", apiKey: "x", capUsd: 5, maxMs: 240_000 });
 const s = r.summary, ev = existsSync(join(r.dir, "events.jsonl")) ? readFileSync(join(r.dir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
@@ -31,4 +31,5 @@ check("rival_config records the memory option, the backend, the namespace and th
 check("run.json carries the same rival_config next to the harness's own fields, none of them changed", runJson.rival_config?.arm === "deepagents-memory" && runJson.scenario_sha256 && runJson.scoring_sha256 && runJson.adapter === "rival-deepagents-memory");
 check("the summarization defaults are the package's, unchanged (fraction 0.85, keep 0.1)", cfg?.summarization?.trigger?.value === 0.85 && cfg.summarization.keep.value === 0.1 && cfg.profile_max_input_tokens === 1e6);
 check("every request reached Bedrock as the one configured model", fake.seen.length > 50 && fake.seen.every((x) => x.model === "global.anthropic.claude-haiku-5-5" && x.bad_fields.length === 0));
+check("with THINKING_BINDING every request asks the API to drop unverifiable thinking blocks, with the beta header, and the run records it", fake.seen.every((x) => x.thinking?.block_binding?.prefix_mismatch_behavior === "drop_block" && x.thinking?.type === "adaptive" && (x.beta ?? []).includes("thinking-binding-controls-2026-08-01")) && runJson.rival_config.thinking_block_binding?.prefix_mismatch_behavior === "drop_block");
 await fake.close(); done();
