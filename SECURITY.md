@@ -1,6 +1,6 @@
 # Security and integrity reports
 
-This repo runs submitted adapter code on a maintainer's machine only inside a re-run we choose to do, and never by default. When we do, the adapter is read first and then runs in a sandbox with no internet and a separate model-only key (see OUTSIDER-RUNS.md). Treat any adapter you did not write as untrusted in the same way: read it before you run it, and give it its own API key with a spend cap. CI on pull requests holds no secrets.
+This repo runs submitted adapter code on a maintainer's machine only inside a re-run we choose to do, and never by default. When we do, the adapter has been read first (see REVIEWING-ADAPTERS.md). Treat any adapter you did not write as untrusted in the same way: read it before you run it, and give it its own API key with a spend cap. CI on pull requests holds no secrets.
 
 Report to open-haul@getargentic.com, not in a public issue:
 
@@ -8,7 +8,7 @@ Report to open-haul@getargentic.com, not in a public issue:
 - a way to produce a run that validates but was not run honestly
 - a leaked hold-out seed or phrasing pack
 - a secret committed by mistake
-- a way for a submitted adapter, its dependencies or a pull request workflow to read a key, reach the network from the sandbox, or run before it has been reviewed
+- a way for a submitted adapter, its dependencies or a pull request workflow to read a key or run before it has been reviewed
 
 Scorer holes that do not expose private material (a cheap agent that scores too well) are welcome as public issues; see CONTRIBUTING.md.
 

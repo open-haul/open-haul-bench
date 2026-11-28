@@ -2,13 +2,13 @@
 // First pass over an adapter somebody else wrote, BEFORE anyone runs it or installs its dependencies. Free, offline, runs nothing from the folder.
 //   node tools/review-adapter.mjs submissions/<slug>            exit 1 if anything is HIGH
 // It lists what a reviewer has to read first: install scripts, dependencies that do not come from the npm registry, process spawning, dynamic code, bulk reads of the
-// environment, reads of credential folders, unknown network hosts, encoded blobs, binaries. It is a tripwire, not a proof: a clean result never replaces reading the files (OUTSIDER-RUNS.md).
+// environment, reads of credential folders, unknown network hosts, encoded blobs, binaries. It is a tripwire, not a proof: a clean result never replaces reading the files (REVIEWING-ADAPTERS.md).
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, extname, relative } from "node:path";
 
 const CODE = new Set([".mjs", ".js", ".cjs", ".ts", ".mts", ".cts", ".sh", ".py"]), BINARY = new Set([".node", ".so", ".dll", ".dylib", ".exe", ".wasm", ".bin", ".jar", ".class", ".pyc"]);
 const INSTALL_HOOKS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
-const OK_ENV = new Set(["MODEL_KEY", "ANTHROPIC_API_KEY", "MODEL_ID", "UPSTREAM", "RIVAL_MODE", "MODEL_PROVIDER", "MODEL_PRICES", "BEDROCK_MODEL_ID", "HOME", "TMPDIR", "NODE_ENV", "OUTSIDER_RUN"]);
+const OK_ENV = new Set(["MODEL_KEY", "ANTHROPIC_API_KEY", "MODEL_ID", "UPSTREAM", "RIVAL_MODE", "MODEL_PROVIDER", "MODEL_PRICES", "BEDROCK_MODEL_ID", "HOME", "TMPDIR", "NODE_ENV"]);
 const OK_HOSTS = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|bedrock-shim|example\.com|github\.com|docs\..+|.+\.(?:readthedocs\.io|github\.io)|api\.anthropic\.com|code\.claude\.com|docs\.langchain\.com|www\.npmjs\.com|npmjs\.com|registry\.npmjs\.org|arxiv\.org|doi\.org)$/;
 const RULES = [
   ["HIGH", "spawns processes (child_process / exec / spawn)", /\b(?:child_process|execSync|execFile|spawnSync|spawn)\b|\bexec\s*\(/],
@@ -68,6 +68,6 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const dir = process.argv[2]; if (!dir) { console.error("usage: node tools/review-adapter.mjs <submission-dir>"); process.exit(2); }
   const f = reviewAdapter(dir), high = f.filter((x) => x.level === "HIGH");
   for (const x of f.sort((a, b) => (a.level === b.level ? 0 : a.level === "HIGH" ? -1 : 1))) console.log(`${x.level.padEnd(4)} ${x.file}  ${x.what}${x.extra ? `  [${x.extra}]` : ""}`);
-  console.log(`\n${high.length} HIGH, ${f.length - high.length} MED. ${high.length ? "Do not run or install anything until each HIGH is explained or removed." : "No HIGH flags. That is not a clearance: read every file (OUTSIDER-RUNS.md)."}`);
+  console.log(`\n${high.length} HIGH, ${f.length - high.length} MED. ${high.length ? "Do not run or install anything until each HIGH is explained or removed." : "No HIGH flags. That is not a clearance: read every file (REVIEWING-ADAPTERS.md)."}`);
   process.exit(high.length ? 1 : 0);
 }

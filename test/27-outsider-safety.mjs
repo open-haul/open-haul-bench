@@ -1,10 +1,9 @@
-// Free, offline: the rules for running other people's adapters are enforced by tests, not only written down.
-// CI never holds a secret; the IAM policy for outside runs can only invoke the bench model; the sandbox script keeps the key out of the runner; the review scan catches the usual tricks.
+// Free, offline: the rules for outside adapters are enforced by tests, not only written down.
+// CI never holds a secret, and the review scan catches the usual tricks.
 import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reviewAdapter } from "../tools/review-adapter.mjs";
-import { startBedrockShim } from "../tools/bedrock-shim.mjs";
 import { check, done } from "./kit.mjs";
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
@@ -19,33 +18,7 @@ for (const f of readdirSync(new URL("../.github/workflows/", import.meta.url)).f
   check(`${f}: no self-hosted runner`, !/self-hosted/.test(y));
 }
 
-// 2. the IAM policy for outside runs: invoke one model, nothing else
-const pol = JSON.parse(read("tools/outsider/policy-invoke.json")), allow = pol.Statement.filter((s) => s.Effect === "Allow"), deny = pol.Statement.filter((s) => s.Effect === "Deny");
-check("policy allows only bedrock:InvokeModel and InvokeModelWithResponseStream", allow.length === 1 && allow[0].Action.every((a) => /^bedrock:InvokeModel(WithResponseStream)?$/.test(a)) && allow[0].Action.length === 2);
-check("policy resources are the bench model only (no wildcard resource)", allow[0].Resource.length === 2 && allow[0].Resource.every((r) => /^arn:aws:bedrock:[^:]*:[^:]*:(inference-profile\/global\.anthropic\.claude-haiku-5-5|foundation-model\/anthropic\.claude-haiku-5-5\*)$/.test(r)));
-check("policy denies everything else explicitly", deny.length === 1 && deny[0].NotAction.length === 2 && deny[0].Resource === "*");
-const role = JSON.parse(read("tools/outsider/budget-action-role-policy.json")).Statement;
-check("budget action role may only attach the deny policy to the outsider user", role.length === 1 && role[0].Action.every((a) => /^iam:(Attach|Detach)UserPolicy$/.test(a)) && /user\/__USER__$/.test(role[0].Resource) && /policy\/__DENY_POLICY__$/.test(role[0].Condition.ArnEquals["iam:PolicyARN"]));
-const aws = read("tools/outsider/provision-aws.sh");
-check("provision script never prints the key (piped into doppler)", /ServiceCredentialSecret'\s*\\?\s*\n?\s*\|\s*doppler secrets set/.test(aws) || /ServiceCredentialSecret.*\n\s*\| doppler secrets set/.test(aws));
-check("provision script makes an expiring key", /--credential-age-days/.test(aws));
-
-// 3. the sandbox runner: keyless, offline, locked down
-const sb = read("tools/outsider/run-sandboxed.sh"), runnerCmd = sb.slice(sb.indexOf('$DOCKER run --rm --name "$runner"'));
-check("runner is on an --internal network", /network create --internal/.test(sb) && /--network "\$internal"/.test(runnerCmd));
-check("runner never receives the key or AWS variables", !/AWS_|BEDROCK_API_KEY|BEARER/.test(runnerCmd.split("\n").slice(0, 6).join("\n")));
-check("runner is read-only, non-root, no capabilities, no new privileges", /--read-only/.test(sb) && /--user 1000:1000/.test(runnerCmd) && /--cap-drop ALL/.test(sb) && /no-new-privileges/.test(sb));
-check("bench and adapter are mounted read-only", /\$BENCH:\/bench:ro/.test(runnerCmd) && /:\/adapter:ro/.test(runnerCmd));
-check("no privileged container, no docker socket, no host network", !/--privileged|docker\.sock|--network host|--net=host|--pid=host/.test(sb));
-check("install step runs with --ignore-scripts and no key", /npm ci --ignore-scripts/.test(sb) && !/AWS_BEARER_TOKEN_BEDROCK/.test(sb.slice(sb.indexOf('if [ "$mode" = install ]'), sb.indexOf('[ "$mode" = run ]'))));
-check("cap ceiling is enforced", /above the ceiling/.test(sb));
-
-// 4. the shim stays on loopback unless told otherwise
-const a = await startBedrockShim({ endpoint: "http://127.0.0.1:1" }), b = await startBedrockShim({ endpoint: "http://127.0.0.1:1", host: "0.0.0.0" });
-check("shim listens on loopback by default", a.server.address().address === "127.0.0.1"); check("shim host is opt-in", b.server.address().address === "0.0.0.0");
-a.server.close(); b.server.close();
-
-// 5. the review scan catches the usual tricks, and passes a plain adapter
+// 2. the review scan catches the usual tricks, and passes a plain adapter
 const tmp = mkdtempSync(join(tmpdir(), "longshift-t27-")); let n = 0;
 const make = (files) => { const d = join(tmp, `s${++n}`); mkdirSync(d, { recursive: true }); for (const [f, c] of Object.entries(files)) { mkdirSync(join(d, f, ".."), { recursive: true }); writeFileSync(join(d, f), typeof c === "string" ? c : JSON.stringify(c)); } return d; };
 const high = (d) => reviewAdapter(d).filter((x) => x.level === "HIGH");
